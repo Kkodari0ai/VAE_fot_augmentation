@@ -1,0 +1,68 @@
+import tensorflow as tf
+from tensorflow.keras import layers
+import numpy as np
+
+# Define the VAE model
+class VAE(tf.keras.Model):
+    def __init__(self, latent_dim):
+        super(VAE, self).__init__()
+        self.latent_dim = latent_dim
+        self.encoder = tf.keras.Sequential([
+            layers.Input(shape=(28, 28, 1)),
+            layers.Flatten(),
+            layers.Dense(256, activation='relu'),
+            layers.Dense(128, activation='relu'),
+            layers.Dense(latent_dim + latent_dim)
+        ])
+        self.decoder = tf.keras.Sequential([
+            layers.Input(shape=(latent_dim,)),
+            layers.Dense(128, activation='relu'),
+            layers.Dense(256, activation='relu'),
+            layers.Dense(784, activation='sigmoid'),
+            layers.Reshape((28, 28, 1))
+        ])
+    def encode(self, x):
+        mean, logvar = tf.split(self.encoder(x), num_or_size_splits=2, axis=1)
+        return mean, logvar
+    def reparameterize(self, mean, logvar):
+        eps = tf.random.normal(shape=mean.shape)
+        return eps * tf.exp(logvar * 0.5) + mean
+    def decode(self, z):
+        return self.decoder(z)
+    def call(self, x):
+        mean, logvar = self.encode(x)
+        z = self.reparameterize(mean, logvar)
+        x_recon = self.decode(z)
+        return x_recon
+
+# Load the MNIST dataset
+(x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
+x_train = x_train.reshape(-1, 28, 28, 1).astype('float32') / 255.
+
+# Train the VAE model
+vae = VAE(latent_dim=20)
+vae.compile(optimizer=tf.keras.optimizers.Adam())
+vae.fit(x_train, x_train, epochs=10, batch_size=128)
+
+# Generate augmented data
+num_augmentations = 1000
+z = tf.random.normal(shape=(num_augmentations, 20))
+x_augmented = vae.decode(z).numpy().reshape(-1, 28, 28, 1)
+
+# Combine original and augmented data
+x_combined = np.concatenate([x_train, x_augmented], axis=0)
+y_combined = np.concatenate([y_train, np.ones(num_augmentations) * 10], axis=0)
+
+# Train a classifier on the combined data
+model = tf.keras.Sequential([
+    layers.Input(shape=(28, 28, 1)),
+    layers.Conv2D(32, 3, activation='relu'),
+    layers.MaxPooling2D(2),
+    layers.Conv2D(64, 3, activation='relu'),
+    layers.MaxPooling2D(2),
+    layers.Flatten(),
+    layers.Dense(128, activation='relu'),
+    layers.Dense(11, activation='softmax')
+])
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+model.fit(x_combined, y_combined, epochs=5, batch_size=128)
